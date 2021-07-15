@@ -78,6 +78,10 @@ func (r *Request) Do(ctx context.Context, method, uri string, params ...interfac
 	headerParam := make(http.Header)
 	for _, param := range params {
 		switch v := param.(type) {
+		case string:
+			bodyParam = strings.NewReader(v)
+		case []byte:
+			bodyParam = bytes.NewReader(v)
 		case io.Reader:
 			bodyParam = v
 		case http.Header:
