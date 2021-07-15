@@ -63,6 +63,10 @@ func (r *Request) Patch(ctx context.Context, uri string, params ...interface{}) 
 	return r.Do(ctx, "PATCH", uri, params...)
 }
 
+func (r *Request) Put(ctx context.Context, uri string, params ...interface{}) (*Resp, error) {
+	return r.Do(ctx, "PUT", uri, params...)
+}
+
 func (r *Request) Delete(ctx context.Context, uri string, params ...interface{}) (*Resp, error) {
 	return r.Do(ctx, "DELETE", uri, params...)
 }

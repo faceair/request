@@ -12,6 +12,10 @@ func Post(ctx context.Context, uri string, params ...interface{}) (*Resp, error)
 	return std.Post(ctx, uri, params...)
 }
 
+func Put(ctx context.Context, uri string, params ...interface{}) (*Resp, error) {
+	return std.Put(ctx, uri, params...)
+}
+
 func Patch(ctx context.Context, uri string, params ...interface{}) (*Resp, error) {
 	return std.Patch(ctx, uri, params...)
 }
