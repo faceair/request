@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -26,7 +27,22 @@ type HTTPClient interface {
 
 func New() *Request {
 	return &Request{
-		client: &http.Client{Timeout: time.Second * 3},
+		client: &http.Client{
+			Timeout: time.Second * 30,
+			Transport: &http.Transport{
+				Proxy: http.ProxyFromEnvironment,
+				DialContext: (&net.Dialer{
+					Timeout:   30 * time.Second,
+					KeepAlive: 30 * time.Second,
+				}).DialContext,
+				ForceAttemptHTTP2:     true,
+				MaxIdleConns:          100,
+				MaxIdleConnsPerHost:   100,
+				IdleConnTimeout:       90 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
+			},
+		},
 	}
 }
 
@@ -43,6 +59,13 @@ func (r *Request) SetBaseURL(base string) *Request {
 
 func (r *Request) SetBaseClient(client HTTPClient) *Request {
 	r.client = client
+	return r
+}
+
+func (r *Request) SetTimeout(timeout time.Duration) *Request {
+	if client, ok := r.client.(*http.Client); ok {
+		client.Timeout = timeout
+	}
 	return r
 }
 
