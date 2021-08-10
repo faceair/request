@@ -138,7 +138,10 @@ func (r *Request) Do(ctx context.Context, method, uri string, params ...interfac
 		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, fmt.Sprintf("%s%s", r.base, uri), bodyParam)
+	if u, _ := url.Parse(uri); u != nil && u.Scheme == "" {
+		uri = r.base + uri
+	}
+	req, err := http.NewRequestWithContext(ctx, method, uri, bodyParam)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +162,10 @@ func (r *Request) Do(ctx context.Context, method, uri string, params ...interfac
 	}
 
 	resp, err := r.client.Do(req)
-	return &Resp{resp}, err
+	if err != nil {
+		return nil, err
+	}
+	return &Resp{resp}, nil
 }
 
 type Resp struct {
