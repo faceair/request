@@ -33,9 +33,9 @@ type HTTPClient interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
-func New() *Request {
-	return &Request{
-		client: &http.Client{
+func New() *Client {
+	return &Client{
+		http: &http.Client{
 			Timeout: time.Second * 30,
 			Transport: &http.Transport{
 				Proxy: http.ProxyFromEnvironment,
@@ -54,55 +54,55 @@ func New() *Request {
 	}
 }
 
-type Request struct {
-	client  HTTPClient
+type Client struct {
+	http    HTTPClient
 	base    string
 	headers Headers
 }
 
-func (r *Request) SetBaseURL(base string) *Request {
+func (r *Client) SetBaseURL(base string) *Client {
 	r.base = base
 	return r
 }
 
-func (r *Request) SetBaseClient(client HTTPClient) *Request {
-	r.client = client
+func (r *Client) SetBaseClient(client HTTPClient) *Client {
+	r.http = client
 	return r
 }
 
-func (r *Request) SetTimeout(timeout time.Duration) *Request {
-	if client, ok := r.client.(*http.Client); ok {
+func (r *Client) SetTimeout(timeout time.Duration) *Client {
+	if client, ok := r.http.(*http.Client); ok {
 		client.Timeout = timeout
 	}
 	return r
 }
 
-func (r *Request) SetBaseHeaders(headers map[string]string) *Request {
+func (r *Client) SetBaseHeaders(headers map[string]string) *Client {
 	r.headers = headers
 	return r
 }
 
-func (r *Request) Get(ctx context.Context, uri string, params ...interface{}) (*Resp, error) {
+func (r *Client) Get(ctx context.Context, uri string, params ...interface{}) (*Resp, error) {
 	return r.Do(ctx, "GET", uri, params...)
 }
 
-func (r *Request) Post(ctx context.Context, uri string, params ...interface{}) (*Resp, error) {
+func (r *Client) Post(ctx context.Context, uri string, params ...interface{}) (*Resp, error) {
 	return r.Do(ctx, "POST", uri, params...)
 }
 
-func (r *Request) Patch(ctx context.Context, uri string, params ...interface{}) (*Resp, error) {
+func (r *Client) Patch(ctx context.Context, uri string, params ...interface{}) (*Resp, error) {
 	return r.Do(ctx, "PATCH", uri, params...)
 }
 
-func (r *Request) Put(ctx context.Context, uri string, params ...interface{}) (*Resp, error) {
+func (r *Client) Put(ctx context.Context, uri string, params ...interface{}) (*Resp, error) {
 	return r.Do(ctx, "PUT", uri, params...)
 }
 
-func (r *Request) Delete(ctx context.Context, uri string, params ...interface{}) (*Resp, error) {
+func (r *Client) Delete(ctx context.Context, uri string, params ...interface{}) (*Resp, error) {
 	return r.Do(ctx, "DELETE", uri, params...)
 }
 
-func (r *Request) Do(ctx context.Context, method, uri string, params ...interface{}) (*Resp, error) {
+func (r *Client) Do(ctx context.Context, method, uri string, params ...interface{}) (*Resp, error) {
 	var bodyParam io.Reader
 	var queryParam Query
 
@@ -172,7 +172,7 @@ func (r *Request) Do(ctx context.Context, method, uri string, params ...interfac
 		}
 	}
 
-	resp, err := r.client.Do(req)
+	resp, err := r.http.Do(req)
 	if err != nil {
 		return nil, err
 	}
