@@ -18,8 +18,16 @@ import (
 
 type Headers map[string]string
 type Query map[string]string
-type BodyJSON map[string]interface{}
-type BodyForm map[string]string
+type MapJSON map[string]interface{}
+type MapForm map[string]string
+
+type bodyJSON struct {
+	v interface{}
+}
+
+func BodyJSON(v interface{}) *bodyJSON {
+	return &bodyJSON{v: v}
+}
 
 type HTTPClient interface {
 	Do(*http.Request) (*http.Response, error)
@@ -115,7 +123,10 @@ func (r *Request) Do(ctx context.Context, method, uri string, params ...interfac
 			}
 		case Query:
 			queryParam = v
-		case BodyJSON:
+		case *bodyJSON, MapJSON:
+			if vv, ok := param.(*bodyJSON); ok {
+				v = vv.v
+			}
 			jsonValue, err := json.Marshal(v)
 			if err != nil {
 				return nil, err
@@ -124,7 +135,7 @@ func (r *Request) Do(ctx context.Context, method, uri string, params ...interfac
 			if contentType := headerParam.Get("Content-Type"); contentType == "" {
 				headerParam.Set("Content-Type", "application/json; charset=utf-8")
 			}
-		case BodyForm:
+		case MapForm:
 			form := url.Values{}
 			for key, value := range v {
 				form.Add(key, value)
