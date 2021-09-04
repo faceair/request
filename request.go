@@ -171,6 +171,9 @@ func (r *Client) Do(ctx context.Context, method, uri string, params ...interface
 			req.Header.Add(key, value)
 		}
 	}
+	if host := req.Header.Get("Host"); host != "" {
+		req.Host = host
+	}
 
 	resp, err := r.http.Do(req)
 	if err != nil {
