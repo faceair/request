@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -197,6 +198,19 @@ func (r *Resp) String() string {
 func (r *Resp) ReadAll() ([]byte, error) {
 	defer func() { _ = r.Body.Close() }()
 	return ioutil.ReadAll(r.Body)
+}
+
+func (r *Resp) ToFile(filename string) error {
+	defer func() { _ = r.Body.Close() }()
+
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+
+	_, err = io.Copy(file, r.Body)
+	return err
 }
 
 func (r *Resp) ToJSON(v interface{}) error {
