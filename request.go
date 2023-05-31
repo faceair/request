@@ -3,6 +3,7 @@ package request
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -78,6 +79,14 @@ func (r *Client) SetTimeout(timeout time.Duration) *Client {
 	if client, ok := r.http.(*http.Client); ok {
 		client.Timeout = timeout
 	}
+	return r
+}
+
+func (r *Client) SetBasicAuth(username, password string) *Client {
+	if r.headers == nil {
+		r.headers = make(Headers)
+	}
+	r.headers["Authorization"] = "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password))
 	return r
 }
 
