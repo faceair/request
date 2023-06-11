@@ -1,6 +1,6 @@
-## request: A versatile HTTP client for Golang
+# Request
 
-`request` is an intuitive and flexible HTTP client written in Go. Inspired by the simplicity of the project https://github.com/imroc/req, this library aims to provide a higher level of abstraction for handling HTTP requests and responses. With a wide range of customization options, it makes sending HTTP requests and handling responses simpler and more efficient.
+request is an intuitive and flexible HTTP client written in Go. Inspired by the simplicity of the project [req](https://github.com/imroc/req), this library aims to provide a higher level of abstraction for handling HTTP requests and responses. With a wide range of customization options, it makes sending HTTP requests and handling responses simpler and more efficient.
 
 ## Features
 
