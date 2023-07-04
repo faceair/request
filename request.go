@@ -91,7 +91,13 @@ func (r *Client) SetBasicAuth(username, password string) *Client {
 }
 
 func (r *Client) SetBaseHeaders(headers map[string]string) *Client {
-	r.headers = headers
+	if r.headers == nil {
+		r.headers = headers
+	} else {
+		for k, v := range headers {
+			r.headers[k] = v
+		}
+	}
 	return r
 }
 
