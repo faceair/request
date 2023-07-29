@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -60,13 +62,20 @@ func New() *Client {
 }
 
 type Client struct {
-	http    HTTPClient
-	base    string
-	headers Headers
+	rnd      *safeRnd
+	http     HTTPClient
+	baseURL  string
+	baseURLs []string
+	headers  Headers
 }
 
-func (r *Client) SetBaseURL(base string) *Client {
-	r.base = base
+func (r *Client) SetBaseURL(baseURL string) *Client {
+	r.baseURL = baseURL
+	return r
+}
+
+func (r *Client) SetBaseURLs(baseURLs []string) *Client {
+	r.baseURLs = baseURLs
 	return r
 }
 
@@ -169,7 +178,11 @@ func (r *Client) Do(ctx context.Context, method, uri string, params ...interface
 	}
 
 	if u, _ := url.Parse(uri); u != nil && u.Scheme == "" {
-		uri = r.base + uri
+		if len(r.baseURLs) > 0 {
+			uri = r.baseURLs[r.rnd.IntN(len(r.baseURLs))] + uri
+		} else {
+			uri = r.baseURL + uri
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, method, uri, bodyParam)
 	if err != nil {
@@ -234,4 +247,19 @@ func (r *Resp) ToJSON(v interface{}) error {
 		return err
 	}
 	return json.Unmarshal(body, v)
+}
+
+type safeRnd struct {
+	mux sync.Mutex
+	rnd *rand.Rand
+}
+
+func newRnd() *safeRnd {
+	return &safeRnd{rnd: rand.New(rand.NewSource(time.Now().UnixNano()))}
+}
+
+func (r *safeRnd) IntN(n int) int {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+	return r.rnd.Intn(n)
 }
