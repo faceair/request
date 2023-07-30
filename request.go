@@ -53,6 +53,7 @@ func New() *Client {
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 	return &Client{
+		rnd: newSafeRnd(),
 		http: &http.Client{
 			Jar:       jar,
 			Transport: transport,
@@ -254,7 +255,7 @@ type safeRnd struct {
 	rnd *rand.Rand
 }
 
-func newRnd() *safeRnd {
+func newSafeRnd() *safeRnd {
 	return &safeRnd{rnd: rand.New(rand.NewSource(time.Now().UnixNano()))}
 }
 
