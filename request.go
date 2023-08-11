@@ -25,6 +25,7 @@ type Headers map[string]string
 type Query map[string]string
 type MapJSON map[string]interface{}
 type MapForm map[string]string
+type GetBody func() (io.ReadCloser, error)
 
 type bodyJSON struct {
 	v interface{}
@@ -134,6 +135,7 @@ func (r *Client) Delete(ctx context.Context, uri string, params ...interface{}) 
 func (r *Client) Do(ctx context.Context, method, uri string, params ...interface{}) (*Resp, error) {
 	var bodyParam io.Reader
 	var queryParam Query
+	var getBody GetBody
 
 	headerParam := make(http.Header)
 	for _, param := range params {
@@ -173,6 +175,8 @@ func (r *Client) Do(ctx context.Context, method, uri string, params ...interface
 			if contentType := headerParam.Get("Content-Type"); contentType == "" {
 				headerParam.Set("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
 			}
+		case GetBody:
+			getBody = v
 		default:
 			return nil, fmt.Errorf("unknown param %v", param)
 		}
@@ -189,6 +193,7 @@ func (r *Client) Do(ctx context.Context, method, uri string, params ...interface
 	if err != nil {
 		return nil, err
 	}
+	req.GetBody = getBody
 
 	query := req.URL.Query()
 	for key, value := range queryParam {
