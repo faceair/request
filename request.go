@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"net"
 	"net/http"
@@ -66,18 +65,29 @@ func New() *Client {
 type Client struct {
 	rnd      *safeRnd
 	http     HTTPClient
-	baseURL  string
 	baseURLs []string
 	headers  Headers
 }
 
 func (r *Client) SetBaseURL(baseURL string) *Client {
-	r.baseURL = baseURL
+	r.SetBaseURLs([]string{baseURL})
 	return r
 }
 
 func (r *Client) SetBaseURLs(baseURLs []string) *Client {
 	r.baseURLs = baseURLs
+
+	if httpClient, ok := r.http.(*http.Client); ok && len(baseURLs) > 1 {
+		hosts := make([]string, len(baseURLs))
+		for _, baseURL := range baseURLs {
+			baseU, err := url.Parse(baseURL)
+			if err != nil {
+				panic(err)
+			}
+			hosts = append(hosts, baseU.Host)
+		}
+		httpClient.Transport = newLoadBalancer(httpClient.Transport, hosts)
+	}
 	return r
 }
 
@@ -183,10 +193,10 @@ func (r *Client) Do(ctx context.Context, method, uri string, params ...interface
 	}
 
 	if u, _ := url.Parse(uri); u != nil && u.Scheme == "" {
-		if len(r.baseURLs) > 0 {
+		if len(r.baseURLs) == 1 {
+			uri = r.baseURLs[0] + uri
+		} else if len(r.baseURLs) > 1 {
 			uri = r.baseURLs[r.rnd.IntN(len(r.baseURLs))] + uri
-		} else {
-			uri = r.baseURL + uri
 		}
 	}
 	req, err := http.NewRequestWithContext(ctx, method, uri, bodyParam)
@@ -231,7 +241,7 @@ func (r *Resp) String() string {
 
 func (r *Resp) ReadAll() ([]byte, error) {
 	defer func() { _ = r.Body.Close() }()
-	return ioutil.ReadAll(r.Body)
+	return io.ReadAll(r.Body)
 }
 
 func (r *Resp) ToFile(filename string) error {
@@ -255,6 +265,60 @@ func (r *Resp) ToJSON(v interface{}) error {
 	return json.Unmarshal(body, v)
 }
 
+type loadBalancer struct {
+	rand      *safeRnd
+	transport http.RoundTripper
+	hosts     []string
+}
+
+func newLoadBalancer(transport http.RoundTripper, hosts []string) *loadBalancer {
+	return &loadBalancer{
+		transport: transport,
+		hosts:     hosts,
+		rand:      newSafeRnd(),
+	}
+}
+
+func (lb *loadBalancer) RoundTrip(req *http.Request) (*http.Response, error) {
+	var lastErr error
+
+	hosts := make([]string, len(lb.hosts))
+	copy(hosts, lb.hosts)
+
+	lb.rand.Shuffle(len(hosts), func(i, j int) {
+		hosts[i], hosts[j] = hosts[j], hosts[i]
+	})
+
+	for _, host := range hosts {
+		domain, port, _ := net.SplitHostPort(host)
+		ips, err := net.LookupHost(domain)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if len(ips) == 0 {
+			lastErr = fmt.Errorf("no such host for %q", domain)
+			continue
+		}
+
+		lb.rand.Shuffle(len(ips), func(i, j int) {
+			ips[i], ips[j] = ips[j], ips[i]
+		})
+
+		for _, ip := range ips {
+			req.Host = host
+			req.URL.Host = net.JoinHostPort(ip, port)
+			resp, err := lb.transport.RoundTrip(req)
+			if err == nil {
+				return resp, nil
+			}
+			lastErr = err
+		}
+	}
+	return nil, lastErr
+}
+
 type safeRnd struct {
 	mux sync.Mutex
 	rnd *rand.Rand
@@ -264,8 +328,15 @@ func newSafeRnd() *safeRnd {
 	return &safeRnd{rnd: rand.New(rand.NewSource(time.Now().UnixNano()))}
 }
 
+func (r *safeRnd) Shuffle(n int, f func(i, j int)) {
+	r.mux.Lock()
+	r.rnd.Shuffle(n, f)
+	r.mux.Unlock()
+}
+
 func (r *safeRnd) IntN(n int) int {
 	r.mux.Lock()
-	defer r.mux.Unlock()
-	return r.rnd.Intn(n)
+	n = r.rnd.Intn(n)
+	r.mux.Unlock()
+	return n
 }
