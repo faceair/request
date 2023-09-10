@@ -77,7 +77,7 @@ func (r *Client) SetBaseURL(baseURL string) *Client {
 func (r *Client) SetBaseURLs(baseURLs []string) *Client {
 	r.baseURLs = baseURLs
 
-	if httpClient, ok := r.http.(*http.Client); ok && len(baseURLs) > 1 {
+	if httpClient, ok := r.http.(*http.Client); ok {
 		hosts := make([]string, len(baseURLs))
 		for _, baseURL := range baseURLs {
 			baseU, err := url.Parse(baseURL)
@@ -329,6 +329,9 @@ func newSafeRnd() *safeRnd {
 }
 
 func (r *safeRnd) Shuffle(n int, f func(i, j int)) {
+	if n <= 1 {
+		return
+	}
 	r.mux.Lock()
 	r.rnd.Shuffle(n, f)
 	r.mux.Unlock()
