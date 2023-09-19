@@ -112,10 +112,11 @@ func (r *Client) EnableHTTPBalance(cacheExpire time.Duration) *Client {
 		if err != nil {
 			panic(err)
 		}
-		if baseU.Scheme != "http" {
-			panic("http balancer only support http scheme")
+		host, _, err := net.SplitHostPort(baseU.Host)
+		if err != nil {
+			host = baseU.Host
 		}
-		hosts = append(hosts, baseU.Host)
+		hosts = append(hosts, host)
 	}
 	r.http = newHTTPBalancer(r.http, hosts, cacheExpire)
 	return r
@@ -298,13 +299,13 @@ func (r *Resp) ToJSON(v interface{}) error {
 type DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
 
 type DNSBalancer struct {
-	rand        *safeRnd
+	rnd         *safeRnd
 	dialContext DialContext
 }
 
 func newDNSBalancer(dialContext DialContext) *DNSBalancer {
 	return &DNSBalancer{
-		rand:        newSafeRnd(),
+		rnd:         newSafeRnd(),
 		dialContext: dialContext,
 	}
 }
@@ -324,13 +325,13 @@ func (lb *DNSBalancer) DialContext(ctx context.Context, network, addr string) (n
 		return nil, fmt.Errorf("no such host for %q", host)
 	}
 
-	lb.rand.Shuffle(len(ips), func(i, j int) {
+	lb.rnd.Shuffle(len(ips), func(i, j int) {
 		ips[i], ips[j] = ips[j], ips[i]
 	})
 
 	var lastErr error
 	for _, ip := range ips {
-		conn, err := lb.dialContext(ctx, network, fmt.Sprintf("%s:%s", ip, port))
+		conn, err := lb.dialContext(ctx, network, net.JoinHostPort(ip, port))
 		if err == nil {
 			return conn, nil
 		}
@@ -340,74 +341,96 @@ func (lb *DNSBalancer) DialContext(ctx context.Context, network, addr string) (n
 }
 
 type HTTPBalancer struct {
-	rand         *safeRnd
-	http         HTTPClient
+	mu           sync.Mutex
+	rnd          *safeRnd
+	httpClient   HTTPClient
 	hosts        []string
-	cacheExpire  time.Duration
-	cacheIPs     map[string][]string
-	cacheExpires map[string]time.Time
+	cacheTTL     time.Duration
+	cachedIPs    map[string][]string
+	cachedExpiry map[string]time.Time
 }
 
-func newHTTPBalancer(http HTTPClient, hosts []string, cacheExpire time.Duration) *HTTPBalancer {
+func newHTTPBalancer(http HTTPClient, targetHosts []string, cacheTTL time.Duration) *HTTPBalancer {
 	return &HTTPBalancer{
-		rand:         newSafeRnd(),
-		http:         http,
-		hosts:        hosts,
-		cacheExpire:  cacheExpire,
-		cacheIPs:     make(map[string][]string),
-		cacheExpires: make(map[string]time.Time),
+		rnd:          newSafeRnd(),
+		httpClient:   http,
+		hosts:        targetHosts,
+		cacheTTL:     cacheTTL,
+		cachedIPs:    make(map[string][]string),
+		cachedExpiry: make(map[string]time.Time),
 	}
 }
 
 func (lb *HTTPBalancer) Do(req *http.Request) (*http.Response, error) {
-	var lastErr error
+	var hosts []string
 
-	hosts := make([]string, len(lb.hosts))
-	copy(hosts, lb.hosts)
+	lb.mu.Lock()
+	hosts = lb.hosts
+	if len(hosts) > 1 {
+		hosts = append([]string(nil), hosts...)
+		lb.rnd.Shuffle(len(hosts), func(i, j int) {
+			hosts[i], hosts[j] = hosts[j], hosts[i]
+		})
+	}
+	lb.mu.Unlock()
 
-	lb.rand.Shuffle(len(hosts), func(i, j int) {
-		hosts[i], hosts[j] = hosts[j], hosts[i]
-	})
+	var finalErr error
 
 	for _, host := range hosts {
-		domain, _, err := net.SplitHostPort(host)
-		if err != nil {
-			domain = host
-		}
-
 		var ips []string
-		if exp, ok := lb.cacheExpires[domain]; ok && time.Now().Before(exp) {
-			ips = lb.cacheIPs[domain]
-		} else {
-			ips, err = net.LookupHost(domain)
+
+		lb.mu.Lock()
+		if exp, ok := lb.cachedExpiry[host]; ok && time.Now().Before(exp) {
+			ips = lb.cachedIPs[host]
+			if len(ips) > 1 {
+				ips = append([]string(nil), ips...)
+			}
+		}
+		lb.mu.Unlock()
+
+		if ips == nil {
+			var err error
+			ips, err = net.LookupHost(host)
 			if err != nil {
-				lastErr = err
+				finalErr = err
 				continue
 			}
-			lb.cacheIPs[domain] = ips
-			lb.cacheExpires[domain] = time.Now().Add(lb.cacheExpire)
+
+			lb.mu.Lock()
+			if len(lb.cachedExpiry) > 1024 {
+				current := time.Now()
+				for k, v := range lb.cachedExpiry {
+					if current.After(v) {
+						delete(lb.cachedExpiry, k)
+						delete(lb.cachedIPs, k)
+					}
+				}
+			}
+			lb.cachedIPs[host] = ips
+			lb.cachedExpiry[host] = time.Now().Add(lb.cacheTTL)
+			lb.mu.Unlock()
 		}
 
 		if len(ips) == 0 {
-			lastErr = fmt.Errorf("no such host for %q", domain)
+			finalErr = fmt.Errorf("no such host for %q", host)
 			continue
 		}
 
-		lb.rand.Shuffle(len(ips), func(i, j int) {
+		lb.rnd.Shuffle(len(ips), func(i, j int) {
 			ips[i], ips[j] = ips[j], ips[i]
 		})
 
 		for _, ip := range ips {
 			req.Host = ip
-			req.URL.Host = domain
-			resp, err := lb.http.Do(req)
+			req.URL.Host = host
+			resp, err := lb.httpClient.Do(req)
 			if err == nil {
 				return resp, nil
 			}
-			lastErr = err
+			finalErr = err
 		}
 	}
-	return nil, lastErr
+	return nil, finalErr
 }
 
 type safeRnd struct {
