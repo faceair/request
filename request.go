@@ -102,7 +102,7 @@ func (r *Client) SetBaseURLs(baseURLs []string) *Client {
 	return r
 }
 
-func (r *Client) EnableHTTPBalance() *Client {
+func (r *Client) EnableHTTPBalance(cacheExpire time.Duration) *Client {
 	if len(r.baseURLs) == 0 {
 		panic("http balancer requires base urls")
 	}
@@ -117,7 +117,7 @@ func (r *Client) EnableHTTPBalance() *Client {
 		}
 		hosts = append(hosts, baseU.Host)
 	}
-	r.http = newHTTPBalancer(r.http, hosts)
+	r.http = newHTTPBalancer(r.http, hosts, cacheExpire)
 	return r
 }
 
@@ -340,16 +340,22 @@ func (lb *DNSBalancer) DialContext(ctx context.Context, network, addr string) (n
 }
 
 type HTTPBalancer struct {
-	rand  *safeRnd
-	http  HTTPClient
-	hosts []string
+	rand         *safeRnd
+	http         HTTPClient
+	hosts        []string
+	cacheExpire  time.Duration
+	cacheIPs     map[string][]string
+	cacheExpires map[string]time.Time
 }
 
-func newHTTPBalancer(http HTTPClient, hosts []string) *HTTPBalancer {
+func newHTTPBalancer(http HTTPClient, hosts []string, cacheExpire time.Duration) *HTTPBalancer {
 	return &HTTPBalancer{
-		rand:  newSafeRnd(),
-		http:  http,
-		hosts: hosts,
+		rand:         newSafeRnd(),
+		http:         http,
+		hosts:        hosts,
+		cacheExpire:  cacheExpire,
+		cacheIPs:     make(map[string][]string),
+		cacheExpires: make(map[string]time.Time),
 	}
 }
 
@@ -368,10 +374,18 @@ func (lb *HTTPBalancer) Do(req *http.Request) (*http.Response, error) {
 		if err != nil {
 			domain = host
 		}
-		ips, err := net.LookupHost(domain)
-		if err != nil {
-			lastErr = err
-			continue
+
+		var ips []string
+		if exp, ok := lb.cacheExpires[domain]; ok && time.Now().Before(exp) {
+			ips = lb.cacheIPs[domain]
+		} else {
+			ips, err = net.LookupHost(domain)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			lb.cacheIPs[domain] = ips
+			lb.cacheExpires[domain] = time.Now().Add(lb.cacheExpire)
 		}
 
 		if len(ips) == 0 {
