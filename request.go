@@ -77,17 +77,36 @@ func (r *Client) SetBaseURL(baseURL string) *Client {
 func (r *Client) SetBaseURLs(baseURLs []string) *Client {
 	r.baseURLs = baseURLs
 
-	if httpClient, ok := r.http.(*http.Client); ok {
-		hosts := make([]string, 0, len(baseURLs))
-		for _, baseURL := range baseURLs {
-			baseU, err := url.Parse(baseURL)
-			if err != nil {
-				panic(err)
-			}
-			hosts = append(hosts, baseU.Host)
-		}
-		httpClient.Transport = newLoadBalancer(httpClient.Transport, hosts)
+	httpClient, ok := r.http.(*http.Client)
+	if !ok {
+		return r
 	}
+	httpTransport, ok := httpClient.Transport.(*http.Transport)
+	if !ok {
+		return r
+	}
+
+	hosts := make([]string, 0, len(baseURLs))
+	for _, baseURL := range baseURLs {
+		baseU, err := url.Parse(baseURL)
+		if err != nil {
+			panic(err)
+		}
+		hosts = append(hosts, baseU.Host)
+	}
+	var dialContext DialContext
+	if httpTransport.DialContext != nil {
+		dialContext = httpTransport.DialContext
+	} else {
+		dialContext = (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+			DualStack: true,
+		}).DialContext
+	}
+
+	balancer := newLoadBalancer(dialContext, hosts)
+	httpTransport.DialContext = balancer.DialContext
 	return r
 }
 
@@ -265,58 +284,48 @@ func (r *Resp) ToJSON(v interface{}) error {
 	return json.Unmarshal(body, v)
 }
 
+type DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
+
 type loadBalancer struct {
-	rand      *safeRnd
-	transport http.RoundTripper
-	hosts     []string
+	rand        *safeRnd
+	dialContext DialContext
+	hosts       []string
 }
 
-func newLoadBalancer(transport http.RoundTripper, hosts []string) *loadBalancer {
+func newLoadBalancer(dialContext DialContext, hosts []string) *loadBalancer {
 	return &loadBalancer{
-		transport: transport,
-		hosts:     hosts,
-		rand:      newSafeRnd(),
+		rand:        newSafeRnd(),
+		hosts:       hosts,
+		dialContext: dialContext,
 	}
 }
 
-func (lb *loadBalancer) RoundTrip(req *http.Request) (*http.Response, error) {
-	var lastErr error
+func (lb *loadBalancer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
 
-	hosts := make([]string, len(lb.hosts))
-	copy(hosts, lb.hosts)
+	ips, err := net.LookupHost(host)
+	if err != nil {
+		return nil, err
+	}
 
-	lb.rand.Shuffle(len(hosts), func(i, j int) {
-		hosts[i], hosts[j] = hosts[j], hosts[i]
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("no such host for %q", host)
+	}
+
+	lb.rand.Shuffle(len(ips), func(i, j int) {
+		ips[i], ips[j] = ips[j], ips[i]
 	})
 
-	for _, host := range hosts {
-		domain, _, err := net.SplitHostPort(host)
-		if err != nil {
-			domain = host
+	var lastErr error
+	for _, ip := range ips {
+		conn, err := lb.dialContext(ctx, network, fmt.Sprintf("%s:%s", ip, port))
+		if err == nil {
+			return conn, nil
 		}
-		ips, err := net.LookupHost(domain)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		if len(ips) == 0 {
-			lastErr = fmt.Errorf("no such host for %q", domain)
-			continue
-		}
-
-		lb.rand.Shuffle(len(ips), func(i, j int) {
-			ips[i], ips[j] = ips[j], ips[i]
-		})
-
-		for _, ip := range ips {
-			req.Host = ip
-			resp, err := lb.transport.RoundTrip(req)
-			if err == nil {
-				return resp, nil
-			}
-			lastErr = err
-		}
+		lastErr = err
 	}
 	return nil, lastErr
 }
