@@ -78,7 +78,7 @@ func (r *Client) SetBaseURLs(baseURLs []string) *Client {
 	r.baseURLs = baseURLs
 
 	if httpClient, ok := r.http.(*http.Client); ok {
-		hosts := make([]string, len(baseURLs))
+		hosts := make([]string, 0, len(baseURLs))
 		for _, baseURL := range baseURLs {
 			baseU, err := url.Parse(baseURL)
 			if err != nil {
