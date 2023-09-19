@@ -86,14 +86,6 @@ func (r *Client) SetBaseURLs(baseURLs []string) *Client {
 		return r
 	}
 
-	hosts := make([]string, 0, len(baseURLs))
-	for _, baseURL := range baseURLs {
-		baseU, err := url.Parse(baseURL)
-		if err != nil {
-			panic(err)
-		}
-		hosts = append(hosts, baseU.Host)
-	}
 	var dialContext DialContext
 	if httpTransport.DialContext != nil {
 		dialContext = httpTransport.DialContext
@@ -105,8 +97,27 @@ func (r *Client) SetBaseURLs(baseURLs []string) *Client {
 		}).DialContext
 	}
 
-	balancer := newLoadBalancer(dialContext, hosts)
+	balancer := newDNSBalancer(dialContext)
 	httpTransport.DialContext = balancer.DialContext
+	return r
+}
+
+func (r *Client) EnableHTTPBalance() *Client {
+	if len(r.baseURLs) == 0 {
+		panic("http balancer requires base urls")
+	}
+	hosts := make([]string, 0, len(r.baseURLs))
+	for _, baseURL := range r.baseURLs {
+		baseU, err := url.Parse(baseURL)
+		if err != nil {
+			panic(err)
+		}
+		if baseU.Scheme != "http" {
+			panic("http balancer only support http scheme")
+		}
+		hosts = append(hosts, baseU.Host)
+	}
+	r.http = newHTTPBalancer(r.http, hosts)
 	return r
 }
 
@@ -286,21 +297,19 @@ func (r *Resp) ToJSON(v interface{}) error {
 
 type DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
 
-type loadBalancer struct {
+type DNSBalancer struct {
 	rand        *safeRnd
 	dialContext DialContext
-	hosts       []string
 }
 
-func newLoadBalancer(dialContext DialContext, hosts []string) *loadBalancer {
-	return &loadBalancer{
+func newDNSBalancer(dialContext DialContext) *DNSBalancer {
+	return &DNSBalancer{
 		rand:        newSafeRnd(),
-		hosts:       hosts,
 		dialContext: dialContext,
 	}
 }
 
-func (lb *loadBalancer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+func (lb *DNSBalancer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
@@ -326,6 +335,63 @@ func (lb *loadBalancer) DialContext(ctx context.Context, network, addr string) (
 			return conn, nil
 		}
 		lastErr = err
+	}
+	return nil, lastErr
+}
+
+type HTTPBalancer struct {
+	rand  *safeRnd
+	http  HTTPClient
+	hosts []string
+}
+
+func newHTTPBalancer(http HTTPClient, hosts []string) *HTTPBalancer {
+	return &HTTPBalancer{
+		rand:  newSafeRnd(),
+		http:  http,
+		hosts: hosts,
+	}
+}
+
+func (lb *HTTPBalancer) Do(req *http.Request) (*http.Response, error) {
+	var lastErr error
+
+	hosts := make([]string, len(lb.hosts))
+	copy(hosts, lb.hosts)
+
+	lb.rand.Shuffle(len(hosts), func(i, j int) {
+		hosts[i], hosts[j] = hosts[j], hosts[i]
+	})
+
+	for _, host := range hosts {
+		domain, _, err := net.SplitHostPort(host)
+		if err != nil {
+			domain = host
+		}
+		ips, err := net.LookupHost(domain)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if len(ips) == 0 {
+			lastErr = fmt.Errorf("no such host for %q", domain)
+			continue
+		}
+
+		lb.rand.Shuffle(len(ips), func(i, j int) {
+			ips[i], ips[j] = ips[j], ips[i]
+		})
+
+		for _, ip := range ips {
+			req.Host = ip
+			req.URL.Host = domain
+			resp, err := lb.http.Do(req)
+			if err == nil {
+				return resp, nil
+			}
+			lastErr = err
+		}
 	}
 	return nil, lastErr
 }
