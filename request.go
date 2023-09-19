@@ -290,7 +290,10 @@ func (lb *loadBalancer) RoundTrip(req *http.Request) (*http.Response, error) {
 	})
 
 	for _, host := range hosts {
-		domain, port, _ := net.SplitHostPort(host)
+		domain, port, err := net.SplitHostPort(host)
+		if err != nil {
+			domain = host
+		}
 		ips, err := net.LookupHost(domain)
 		if err != nil {
 			lastErr = err
