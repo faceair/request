@@ -3,6 +3,7 @@ package request
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -77,32 +78,34 @@ func (r *Client) SetBaseURL(baseURL string) *Client {
 func (r *Client) SetBaseURLs(baseURLs []string) *Client {
 	r.baseURLs = baseURLs
 
-	httpClient, ok := r.http.(*http.Client)
-	if !ok {
-		return r
+	if httpClient, ok := r.http.(*http.Client); ok {
+		if httpTransport, ok := httpClient.Transport.(*http.Transport); ok {
+			var dialContext DialContext
+			if httpTransport.DialContext != nil {
+				dialContext = httpTransport.DialContext
+			} else {
+				dialContext = (&net.Dialer{
+					Timeout:   30 * time.Second,
+					KeepAlive: 30 * time.Second,
+					DualStack: true,
+				}).DialContext
+			}
+			balancer := newDNSBalancer(dialContext)
+			httpTransport.DialContext = balancer.DialContext
+		}
 	}
-	httpTransport, ok := httpClient.Transport.(*http.Transport)
-	if !ok {
-		return r
-	}
-
-	var dialContext DialContext
-	if httpTransport.DialContext != nil {
-		dialContext = httpTransport.DialContext
-	} else {
-		dialContext = (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-			DualStack: true,
-		}).DialContext
-	}
-
-	balancer := newDNSBalancer(dialContext)
-	httpTransport.DialContext = balancer.DialContext
 	return r
 }
 
 func (r *Client) EnableHTTPBalance(cacheExpire time.Duration) *Client {
+	if httpClient, ok := r.http.(*http.Client); ok {
+		if httpTransport, ok := httpClient.Transport.(*http.Transport); ok {
+			httpTransport.TLSClientConfig = &tls.Config{
+				InsecureSkipVerify: true,
+			}
+		}
+	}
+
 	if len(r.baseURLs) == 0 {
 		panic("http balancer requires base urls")
 	}
