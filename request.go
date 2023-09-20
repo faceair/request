@@ -112,11 +112,7 @@ func (r *Client) EnableHTTPBalance(cacheExpire time.Duration) *Client {
 		if err != nil {
 			panic(err)
 		}
-		host, _, err := net.SplitHostPort(baseU.Host)
-		if err != nil {
-			host = baseU.Host
-		}
-		hosts = append(hosts, host)
+		hosts = append(hosts, baseU.Host)
 	}
 	r.http = newHTTPBalancer(r.http, hosts, cacheExpire)
 	return r
@@ -420,9 +416,14 @@ func (lb *HTTPBalancer) Do(req *http.Request) (*http.Response, error) {
 			ips[i], ips[j] = ips[j], ips[i]
 		})
 
+		_, port, _ := net.SplitHostPort(host)
 		for _, ip := range ips {
-			req.Host = ip
-			req.URL.Host = host
+			hostname := ip
+			if port != "" {
+				hostname = net.JoinHostPort(ip, port)
+			}
+			req.Host = hostname
+			req.URL.Host = hostname
 			resp, err := lb.httpClient.Do(req)
 			if err == nil {
 				return resp, nil
