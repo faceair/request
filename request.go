@@ -417,7 +417,7 @@ func (lb *HTTPBalancer) Do(req *http.Request) (*http.Response, error) {
 			if port != "" {
 				hostname = net.JoinHostPort(ip, port)
 			}
-			req.Host = hostname
+			req.Host = host
 			req.URL.Host = hostname
 			resp, err := lb.httpClient.Do(req)
 			if err == nil {
