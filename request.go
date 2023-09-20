@@ -398,15 +398,6 @@ func (lb *HTTPBalancer) Do(req *http.Request) (*http.Response, error) {
 			}
 
 			lb.mu.Lock()
-			if len(lb.cachedExpiry) > 1024 {
-				current := time.Now()
-				for k, v := range lb.cachedExpiry {
-					if current.After(v) {
-						delete(lb.cachedExpiry, k)
-						delete(lb.cachedIPs, k)
-					}
-				}
-			}
 			lb.cachedIPs[host] = ips
 			lb.cachedExpiry[host] = time.Now().Add(lb.cacheTTL)
 			lb.mu.Unlock()
