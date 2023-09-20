@@ -375,6 +375,11 @@ func (lb *HTTPBalancer) Do(req *http.Request) (*http.Response, error) {
 	for _, host := range hosts {
 		var ips []string
 
+		domain, port, _ := net.SplitHostPort(host)
+		if domain == "" {
+			domain = host
+		}
+
 		lb.mu.Lock()
 		if exp, ok := lb.cachedExpiry[host]; ok && time.Now().Before(exp) {
 			ips = lb.cachedIPs[host]
@@ -386,7 +391,7 @@ func (lb *HTTPBalancer) Do(req *http.Request) (*http.Response, error) {
 
 		if ips == nil {
 			var err error
-			ips, err = net.LookupHost(host)
+			ips, err = net.LookupHost(domain)
 			if err != nil {
 				finalErr = err
 				continue
@@ -416,7 +421,6 @@ func (lb *HTTPBalancer) Do(req *http.Request) (*http.Response, error) {
 			ips[i], ips[j] = ips[j], ips[i]
 		})
 
-		_, port, _ := net.SplitHostPort(host)
 		for _, ip := range ips {
 			hostname := ip
 			if port != "" {
