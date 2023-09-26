@@ -141,7 +141,7 @@ func (r *Client) SetBasicAuth(username, password string) *Client {
 	return r
 }
 
-func (r *Client) SetBaseHeaders(headers map[string]string) *Client {
+func (r *Client) SetBaseHeaders(headers Headers) *Client {
 	if r.headers == nil {
 		r.headers = headers
 	} else {
