@@ -44,7 +44,7 @@ func New() *Client {
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
+			Timeout:   time.Second,
 			KeepAlive: 30 * time.Second,
 			DualStack: true,
 		}).DialContext,
@@ -58,7 +58,7 @@ func New() *Client {
 		http: &http.Client{
 			Jar:       jar,
 			Transport: transport,
-			Timeout:   2 * time.Minute,
+			Timeout:   time.Minute,
 		},
 	}
 }
@@ -85,7 +85,7 @@ func (r *Client) SetBaseURLs(baseURLs []string) *Client {
 				dialContext = httpTransport.DialContext
 			} else {
 				dialContext = (&net.Dialer{
-					Timeout:   30 * time.Second,
+					Timeout:   time.Second,
 					KeepAlive: 30 * time.Second,
 					DualStack: true,
 				}).DialContext
@@ -127,9 +127,30 @@ func (r *Client) SetBaseClient(client HTTPClient) *Client {
 }
 
 func (r *Client) SetTimeout(timeout time.Duration) *Client {
-	if client, ok := r.http.(*http.Client); ok {
-		client.Timeout = timeout
+	var underClient *http.Client
+	switch client := r.http.(type) {
+	case *http.Client:
+		underClient = client
+	case *HTTPBalancer:
+		underClient = client.httpClient.(*http.Client)
 	}
+	underClient.Timeout = timeout
+	return r
+}
+
+func (r *Client) SetDialTimeout(timeout time.Duration) *Client {
+	var underClient *http.Client
+	switch client := r.http.(type) {
+	case *http.Client:
+		underClient = client
+	case *HTTPBalancer:
+		underClient = client.httpClient.(*http.Client)
+	}
+	underClient.Transport.(*http.Transport).DialContext = newDNSBalancer((&net.Dialer{
+		Timeout:   timeout,
+		KeepAlive: 30 * time.Second,
+		DualStack: true,
+	}).DialContext).DialContext
 	return r
 }
 
