@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -48,7 +49,8 @@ func New() *Client {
 			KeepAlive: 30 * time.Second,
 			DualStack: true,
 		}).DialContext,
-		MaxIdleConns:          100,
+		MaxIdleConns:          128,
+		MaxIdleConnsPerHost:   128,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
@@ -151,6 +153,19 @@ func (r *Client) SetDialTimeout(timeout time.Duration) *Client {
 		KeepAlive: 30 * time.Second,
 		DualStack: true,
 	}).DialContext).DialContext
+	return r
+}
+
+func (r *Client) SetMaxIdleConns(maxIdleConns int) *Client {
+	var underClient *http.Client
+	switch client := r.http.(type) {
+	case *http.Client:
+		underClient = client
+	case *HTTPBalancer:
+		underClient = client.httpClient.(*http.Client)
+	}
+	underClient.Transport.(*http.Transport).MaxIdleConns = maxIdleConns
+	underClient.Transport.(*http.Transport).MaxConnsPerHost = maxIdleConns
 	return r
 }
 
@@ -342,7 +357,7 @@ func (lb *DNSBalancer) DialContext(ctx context.Context, network, addr string) (n
 	}
 
 	if len(ips) == 0 {
-		return nil, fmt.Errorf("no such host for %q", host)
+		return nil, newNoSuchHostError(host)
 	}
 
 	lb.rnd.Shuffle(len(ips), func(i, j int) {
@@ -361,7 +376,7 @@ func (lb *DNSBalancer) DialContext(ctx context.Context, network, addr string) (n
 }
 
 type HTTPBalancer struct {
-	mu           sync.Mutex
+	mu           sync.RWMutex
 	rnd          *safeRnd
 	httpClient   HTTPClient
 	hosts        []string
@@ -384,7 +399,7 @@ func newHTTPBalancer(http HTTPClient, targetHosts []string, cacheTTL time.Durati
 func (lb *HTTPBalancer) Do(req *http.Request) (*http.Response, error) {
 	var hosts []string
 
-	lb.mu.Lock()
+	lb.mu.RLock()
 	hosts = lb.hosts
 	if len(hosts) > 1 {
 		hosts = append([]string(nil), hosts...)
@@ -392,7 +407,7 @@ func (lb *HTTPBalancer) Do(req *http.Request) (*http.Response, error) {
 			hosts[i], hosts[j] = hosts[j], hosts[i]
 		})
 	}
-	lb.mu.Unlock()
+	lb.mu.RUnlock()
 
 	var finalErr error
 
@@ -404,14 +419,14 @@ func (lb *HTTPBalancer) Do(req *http.Request) (*http.Response, error) {
 			domain = host
 		}
 
-		lb.mu.Lock()
+		lb.mu.RLock()
 		if exp, ok := lb.cachedExpiry[host]; ok && time.Now().Before(exp) {
 			ips = lb.cachedIPs[host]
 			if len(ips) > 1 {
 				ips = append([]string(nil), ips...)
 			}
 		}
-		lb.mu.Unlock()
+		lb.mu.RUnlock()
 
 		if ips == nil {
 			var err error
@@ -428,7 +443,7 @@ func (lb *HTTPBalancer) Do(req *http.Request) (*http.Response, error) {
 		}
 
 		if len(ips) == 0 {
-			finalErr = fmt.Errorf("no such host for %q", host)
+			finalErr = newNoSuchHostError(host)
 			continue
 		}
 
@@ -445,7 +460,10 @@ func (lb *HTTPBalancer) Do(req *http.Request) (*http.Response, error) {
 			req.URL.Host = hostname
 			resp, err := lb.httpClient.Do(req)
 			if err == nil {
-				return resp, nil
+				return resp, err
+			}
+			if !isRetryableError(err) {
+				return nil, err
 			}
 			finalErr = err
 		}
@@ -476,4 +494,16 @@ func (r *safeRnd) IntN(n int) int {
 	n = r.rnd.Intn(n)
 	r.mux.Unlock()
 	return n
+}
+
+func newNoSuchHostError(host string) error {
+	return &net.DNSError{Err: fmt.Sprintf("no such host for %q", host), Name: host, IsNotFound: true}
+}
+
+func isRetryableError(err error) bool {
+	var opErr *net.OpError
+	if !errors.As(err, &opErr) {
+		return false
+	}
+	return opErr.Op == "dial"
 }
