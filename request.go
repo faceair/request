@@ -25,16 +25,16 @@ import (
 
 type Headers map[string]string
 type Query map[string]string
-type MapJSON map[string]interface{}
+type MapJSON map[string]any
 type MapForm map[string]string
 type MapMultipartForm map[string]any
 type GetBody func() (io.ReadCloser, error)
 
 type bodyJSON struct {
-	v interface{}
+	v any
 }
 
-func BodyJSON(v interface{}) *bodyJSON {
+func BodyJSON(v any) *bodyJSON {
 	return &bodyJSON{v: v}
 }
 
@@ -190,27 +190,27 @@ func (r *Client) SetBaseHeaders(headers Headers) *Client {
 	return r
 }
 
-func (r *Client) Get(ctx context.Context, uri string, params ...interface{}) (*Resp, error) {
+func (r *Client) Get(ctx context.Context, uri string, params ...any) (*Resp, error) {
 	return r.Do(ctx, "GET", uri, params...)
 }
 
-func (r *Client) Post(ctx context.Context, uri string, params ...interface{}) (*Resp, error) {
+func (r *Client) Post(ctx context.Context, uri string, params ...any) (*Resp, error) {
 	return r.Do(ctx, "POST", uri, params...)
 }
 
-func (r *Client) Patch(ctx context.Context, uri string, params ...interface{}) (*Resp, error) {
+func (r *Client) Patch(ctx context.Context, uri string, params ...any) (*Resp, error) {
 	return r.Do(ctx, "PATCH", uri, params...)
 }
 
-func (r *Client) Put(ctx context.Context, uri string, params ...interface{}) (*Resp, error) {
+func (r *Client) Put(ctx context.Context, uri string, params ...any) (*Resp, error) {
 	return r.Do(ctx, "PUT", uri, params...)
 }
 
-func (r *Client) Delete(ctx context.Context, uri string, params ...interface{}) (*Resp, error) {
+func (r *Client) Delete(ctx context.Context, uri string, params ...any) (*Resp, error) {
 	return r.Do(ctx, "DELETE", uri, params...)
 }
 
-func (r *Client) Do(ctx context.Context, method, uri string, params ...interface{}) (*Resp, error) {
+func (r *Client) Do(ctx context.Context, method, uri string, params ...any) (*Resp, error) {
 	var bodyParam io.Reader
 	var queryParam Query
 	var getBody GetBody
@@ -361,7 +361,7 @@ func (r *Resp) ToFile(filename string) error {
 	return err
 }
 
-func (r *Resp) ToJSON(v interface{}) error {
+func (r *Resp) ToJSON(v any) error {
 	body, err := r.ReadAll()
 	if err != nil {
 		return err
