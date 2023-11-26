@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
@@ -26,6 +27,7 @@ type Headers map[string]string
 type Query map[string]string
 type MapJSON map[string]interface{}
 type MapForm map[string]string
+type MapMultipartForm map[string]any
 type GetBody func() (io.ReadCloser, error)
 
 type bodyJSON struct {
@@ -250,6 +252,42 @@ func (r *Client) Do(ctx context.Context, method, uri string, params ...interface
 			bodyParam = strings.NewReader(form.Encode())
 			if contentType := headerParam.Get("Content-Type"); contentType == "" {
 				headerParam.Set("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
+			}
+		case MapMultipartForm:
+			var buf bytes.Buffer
+			writer := multipart.NewWriter(&buf)
+			for key, value := range v {
+				switch v := value.(type) {
+				case string:
+					if err := writer.WriteField(key, v); err != nil {
+						return nil, err
+					}
+				case []byte:
+					field, err := writer.CreateFormField(key)
+					if err != nil {
+						return nil, err
+					}
+					if _, err := field.Write(v); err != nil {
+						return nil, err
+					}
+				case io.Reader:
+					field, err := writer.CreateFormFile(key, key)
+					if err != nil {
+						return nil, err
+					}
+					if _, err := io.Copy(field, v); err != nil {
+						return nil, err
+					}
+				default:
+					return nil, fmt.Errorf("unknown param %v", param)
+				}
+			}
+			if err := writer.Close(); err != nil {
+				return nil, err
+			}
+			bodyParam = &buf
+			if contentType := headerParam.Get("Content-Type"); contentType == "" {
+				headerParam.Set("Content-Type", "multipart/form-data; charset=utf-8")
 			}
 		case GetBody:
 			getBody = v
