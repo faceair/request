@@ -2,6 +2,7 @@ package request
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
@@ -29,6 +30,12 @@ type MapJSON map[string]any
 type MapForm map[string]string
 type MapMultipartForm map[string]any
 type GetBody func() (io.ReadCloser, error)
+
+type GZipOptions struct{}
+
+var (
+	GZip = GZipOptions{}
+)
 
 type bodyJSON struct {
 	v any
@@ -211,19 +218,20 @@ func (r *Client) Delete(ctx context.Context, uri string, params ...any) (*Resp, 
 }
 
 func (r *Client) Do(ctx context.Context, method, uri string, params ...any) (*Resp, error) {
-	var bodyParam io.Reader
+	var bodyReader io.Reader
 	var queryParam Query
+	var gzipEnable bool
 	var getBody GetBody
 
 	headerParam := make(http.Header)
 	for _, param := range params {
 		switch v := param.(type) {
 		case string:
-			bodyParam = strings.NewReader(v)
+			bodyReader = strings.NewReader(v)
 		case []byte:
-			bodyParam = bytes.NewReader(v)
+			bodyReader = bytes.NewReader(v)
 		case io.Reader:
-			bodyParam = v
+			bodyReader = v
 		case http.Header:
 			headerParam = v
 		case Headers:
@@ -240,7 +248,7 @@ func (r *Client) Do(ctx context.Context, method, uri string, params ...any) (*Re
 			if err != nil {
 				return nil, err
 			}
-			bodyParam = bytes.NewReader(jsonValue)
+			bodyReader = bytes.NewReader(jsonValue)
 			if contentType := headerParam.Get("Content-Type"); contentType == "" {
 				headerParam.Set("Content-Type", "application/json; charset=utf-8")
 			}
@@ -249,7 +257,7 @@ func (r *Client) Do(ctx context.Context, method, uri string, params ...any) (*Re
 			for key, value := range v {
 				form.Add(key, value)
 			}
-			bodyParam = strings.NewReader(form.Encode())
+			bodyReader = strings.NewReader(form.Encode())
 			if contentType := headerParam.Get("Content-Type"); contentType == "" {
 				headerParam.Set("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
 			}
@@ -285,12 +293,15 @@ func (r *Client) Do(ctx context.Context, method, uri string, params ...any) (*Re
 			if err := writer.Close(); err != nil {
 				return nil, err
 			}
-			bodyParam = &buf
+			bodyReader = &buf
 			if contentType := headerParam.Get("Content-Type"); contentType == "" {
 				headerParam.Set("Content-Type", "multipart/form-data; charset=utf-8")
 			}
 		case GetBody:
 			getBody = v
+		case GZipOptions:
+			gzipEnable = true
+			headerParam.Set("Content-Encoding", "gzip")
 		default:
 			return nil, fmt.Errorf("unknown param %v", param)
 		}
@@ -303,7 +314,14 @@ func (r *Client) Do(ctx context.Context, method, uri string, params ...any) (*Re
 			uri = r.baseURLs[r.rnd.IntN(len(r.baseURLs))] + uri
 		}
 	}
-	req, err := http.NewRequestWithContext(ctx, method, uri, bodyParam)
+
+	if gzipEnable {
+		gzipBodyReader := newGzipReader(bodyReader)
+		defer gzipBodyReader.Close()
+		bodyReader = gzipBodyReader
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, uri, bodyReader)
 	if err != nil {
 		return nil, err
 	}
@@ -332,6 +350,68 @@ func (r *Client) Do(ctx context.Context, method, uri string, params ...any) (*Re
 		return nil, err
 	}
 	return &Resp{resp}, nil
+}
+
+type gzipReader struct {
+	srcR   io.Reader
+	srcB   []byte
+	dstW   *gzip.Writer
+	dstB   *bytes.Buffer
+	closed bool
+}
+
+func newGzipReader(src io.Reader) *gzipReader {
+	return gzipReaderPool.Get().(*gzipReader).Reset(src)
+}
+
+func (gr *gzipReader) Reset(src io.Reader) *gzipReader {
+	gr.closed = false
+	gr.srcR = src
+	gr.dstB.Reset()
+	gr.dstW.Reset(gr.dstB)
+	return gr
+}
+
+func (gr *gzipReader) Read(p []byte) (int, error) {
+	if gr.closed && gr.dstB.Len() == 0 {
+		return 0, io.EOF
+	}
+	if gr.dstB.Len() > 0 {
+		return gr.dstB.Read(p)
+	}
+	n, readErr := gr.srcR.Read(gr.srcB)
+	if readErr != nil && readErr != io.EOF {
+		return 0, readErr
+	}
+	if n > 0 {
+		if _, err := gr.dstW.Write(gr.srcB[:n]); err != nil {
+			return 0, err
+		}
+		gr.dstW.Flush()
+	}
+	if readErr == io.EOF {
+		if err := gr.dstW.Close(); err != nil {
+			return 0, err
+		}
+		gr.closed = true
+	}
+	return gr.dstB.Read(p)
+}
+
+func (gr *gzipReader) Close() {
+	gzipReaderPool.Put(gr)
+}
+
+var gzipReaderPool = sync.Pool{
+	New: func() any {
+		size := 32 * 1024
+		gr := &gzipReader{
+			srcB: make([]byte, size),
+			dstB: bytes.NewBuffer(make([]byte, 0, size)),
+		}
+		gr.dstW = gzip.NewWriter(gr.dstB)
+		return gr
+	},
 }
 
 type Resp struct {
