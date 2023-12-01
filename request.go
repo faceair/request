@@ -387,7 +387,6 @@ func (gr *gzipReader) Read(p []byte) (int, error) {
 		if _, err := gr.dstW.Write(gr.srcB[:n]); err != nil {
 			return 0, err
 		}
-		gr.dstW.Flush()
 	}
 	if readErr == io.EOF {
 		if err := gr.dstW.Close(); err != nil {
