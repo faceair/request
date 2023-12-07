@@ -2,7 +2,6 @@ package request
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
@@ -220,7 +219,6 @@ func (r *Client) Delete(ctx context.Context, uri string, params ...any) (*Resp, 
 func (r *Client) Do(ctx context.Context, method, uri string, params ...any) (*Resp, error) {
 	var bodyReader io.Reader
 	var queryParam Query
-	var gzipEnable bool
 	var getBody GetBody
 
 	headerParam := make(http.Header)
@@ -299,9 +297,6 @@ func (r *Client) Do(ctx context.Context, method, uri string, params ...any) (*Re
 			}
 		case GetBody:
 			getBody = v
-		case GZipOptions:
-			gzipEnable = true
-			headerParam.Set("Content-Encoding", "gzip")
 		default:
 			return nil, fmt.Errorf("unknown param %v", param)
 		}
@@ -313,12 +308,6 @@ func (r *Client) Do(ctx context.Context, method, uri string, params ...any) (*Re
 		} else if len(r.baseURLs) > 1 {
 			uri = r.baseURLs[r.rnd.IntN(len(r.baseURLs))] + uri
 		}
-	}
-
-	if gzipEnable {
-		gzipBodyReader := newGzipReader(bodyReader)
-		defer gzipBodyReader.Close()
-		bodyReader = gzipBodyReader
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, uri, bodyReader)
@@ -350,67 +339,6 @@ func (r *Client) Do(ctx context.Context, method, uri string, params ...any) (*Re
 		return nil, err
 	}
 	return &Resp{resp}, nil
-}
-
-type gzipReader struct {
-	srcR   io.Reader
-	srcB   []byte
-	dstW   *gzip.Writer
-	dstB   *bytes.Buffer
-	closed bool
-}
-
-func newGzipReader(src io.Reader) *gzipReader {
-	return gzipReaderPool.Get().(*gzipReader).Reset(src)
-}
-
-func (gr *gzipReader) Reset(src io.Reader) *gzipReader {
-	gr.closed = false
-	gr.srcR = src
-	gr.dstB.Reset()
-	gr.dstW.Reset(gr.dstB)
-	return gr
-}
-
-func (gr *gzipReader) Read(p []byte) (int, error) {
-	if gr.closed && gr.dstB.Len() == 0 {
-		return 0, io.EOF
-	}
-	if gr.dstB.Len() > 0 {
-		return gr.dstB.Read(p)
-	}
-	n, readErr := gr.srcR.Read(gr.srcB)
-	if readErr != nil && readErr != io.EOF {
-		return 0, readErr
-	}
-	if n > 0 {
-		if _, err := gr.dstW.Write(gr.srcB[:n]); err != nil {
-			return 0, err
-		}
-	}
-	if readErr == io.EOF {
-		if err := gr.dstW.Close(); err != nil {
-			return 0, err
-		}
-		gr.closed = true
-	}
-	return gr.dstB.Read(p)
-}
-
-func (gr *gzipReader) Close() {
-	gzipReaderPool.Put(gr)
-}
-
-var gzipReaderPool = sync.Pool{
-	New: func() any {
-		size := 32 * 1024
-		gr := &gzipReader{
-			srcB: make([]byte, size),
-			dstB: bytes.NewBuffer(make([]byte, 0, size)),
-		}
-		gr.dstW = gzip.NewWriter(gr.dstB)
-		return gr
-	},
 }
 
 type Resp struct {
