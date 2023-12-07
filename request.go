@@ -269,7 +269,7 @@ func (r *Client) Do(ctx context.Context, method, uri string, params ...any) (*Re
 						return nil, err
 					}
 				case []byte:
-					field, err := writer.CreateFormField(key)
+					field, err := writer.CreateFormFile(key, key)
 					if err != nil {
 						return nil, err
 					}
