@@ -293,7 +293,7 @@ func (r *Client) Do(ctx context.Context, method, uri string, params ...any) (*Re
 			}
 			bodyReader = &buf
 			if contentType := headerParam.Get("Content-Type"); contentType == "" {
-				headerParam.Set("Content-Type", "multipart/form-data; charset=utf-8")
+				headerParam.Set("Content-Type", writer.FormDataContentType())
 			}
 		case GetBody:
 			getBody = v
