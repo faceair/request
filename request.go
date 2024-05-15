@@ -23,17 +23,13 @@ import (
 
 // inspired by https://github.com/imroc/req
 
-type Headers map[string]string
-type Query map[string]string
-type MapJSON map[string]any
-type MapForm map[string]string
-type MapMultipartForm map[string]any
-type GetBody func() (io.ReadCloser, error)
-
-type GZipOptions struct{}
-
-var (
-	GZip = GZipOptions{}
+type (
+	Headers          map[string]string
+	Query            map[string]string
+	MapJSON          map[string]any
+	MapForm          map[string]string
+	MapMultipartForm map[string]any
+	GetBody          func() (io.ReadCloser, error)
 )
 
 type bodyJSON struct {
