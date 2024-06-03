@@ -60,7 +60,6 @@ func New() *Client {
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 	return &Client{
-		rnd: newSafeRnd(),
 		http: &http.Client{
 			Jar:       jar,
 			Transport: transport,
@@ -70,10 +69,11 @@ func New() *Client {
 }
 
 type Client struct {
-	rnd      *safeRnd
-	http     HTTPClient
-	baseURLs []string
-	headers  Headers
+	mux       sync.Mutex
+	http      HTTPClient
+	baseURLs  []string
+	currIndex int
+	headers   Headers
 }
 
 func (r *Client) SetBaseURL(baseURL string) *Client {
@@ -302,7 +302,10 @@ func (r *Client) Do(ctx context.Context, method, uri string, params ...any) (*Re
 		if len(r.baseURLs) == 1 {
 			uri = r.baseURLs[0] + uri
 		} else if len(r.baseURLs) > 1 {
-			uri = r.baseURLs[r.rnd.IntN(len(r.baseURLs))] + uri
+			r.mux.Lock()
+			uri = r.baseURLs[r.currIndex] + uri
+			r.currIndex = (r.currIndex + 1) % len(r.baseURLs)
+			r.mux.Unlock()
 		}
 	}
 
