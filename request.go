@@ -2,8 +2,6 @@ package request
 
 import (
 	"bytes"
-	"compress/gzip"
-	"compress/zlib"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
@@ -24,11 +22,6 @@ import (
 )
 
 // inspired by https://github.com/imroc/req
-
-const (
-	AcceptEncodingHeader      = "Accept-Encoding"
-	PreferredCompressEncoding = "gzip;q=1, deflate;q=0.9"
-)
 
 type (
 	Headers          map[string]string
@@ -351,35 +344,14 @@ type Resp struct {
 	*http.Response
 }
 
-func (r *Resp) UncompressBody() (body io.ReadCloser, err error) {
-	switch r.Header.Get("Content-Encoding") {
-	case "":
-		body = r.Body
-	case "gzip":
-		body, err = gzip.NewReader(r.Body)
-	case "deflate":
-		body, err = zlib.NewReader(r.Body)
-	default:
-		err = fmt.Errorf("unsupported encoding: %s", r.Header.Get("Content-Encoding"))
-	}
-	return body, err
+func (r *Resp) String() string {
+	body, _ := r.ReadAll()
+	return string(body)
 }
 
 func (r *Resp) ReadAll() ([]byte, error) {
 	defer func() { _ = r.Body.Close() }()
-
-	body, err := r.UncompressBody()
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = body.Close() }()
-
-	return io.ReadAll(body)
-}
-
-func (r *Resp) String() string {
-	body, _ := r.ReadAll()
-	return string(body)
+	return io.ReadAll(r.Body)
 }
 
 func (r *Resp) ToFile(filename string) error {
@@ -391,13 +363,7 @@ func (r *Resp) ToFile(filename string) error {
 	}
 	defer func() { _ = file.Close() }()
 
-	body, err := r.UncompressBody()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = body.Close() }()
-
-	_, err = io.Copy(file, body)
+	_, err = io.Copy(file, r.Body)
 	return err
 }
 
