@@ -313,7 +313,9 @@ func (r *Client) Do(ctx context.Context, method, uri string, params ...any) (*Re
 	if err != nil {
 		return nil, err
 	}
-	req.GetBody = getBody
+	if getBody != nil {
+		req.GetBody = getBody
+	}
 
 	query := req.URL.Query()
 	for key, value := range queryParam {
