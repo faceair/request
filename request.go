@@ -173,6 +173,32 @@ func (r *Client) SetMaxIdleConns(maxIdleConns int) *Client {
 	return r
 }
 
+func (r *Client) SetProxyURL(proxyURL string) *Client {
+	var underClient *http.Client
+	switch client := r.http.(type) {
+	case *http.Client:
+		underClient = client
+	case *HTTPBalancer:
+		underClient = client.httpClient.(*http.Client)
+	}
+
+	tr, ok := underClient.Transport.(*http.Transport)
+	if !ok {
+		panic("transport is not *http.Transport")
+	}
+
+	if proxyURL == "" {
+		tr.Proxy = http.ProxyFromEnvironment
+	} else {
+		u, err := url.Parse(proxyURL)
+		if err != nil {
+			panic(err)
+		}
+		tr.Proxy = http.ProxyURL(u)
+	}
+	return r
+}
+
 func (r *Client) SetBasicAuth(username, password string) *Client {
 	if r.headers == nil {
 		r.headers = make(Headers)
