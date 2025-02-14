@@ -181,12 +181,7 @@ func (r *Client) SetProxyURL(proxyURL string) *Client {
 	case *HTTPBalancer:
 		underClient = client.httpClient.(*http.Client)
 	}
-
-	tr, ok := underClient.Transport.(*http.Transport)
-	if !ok {
-		panic("transport is not *http.Transport")
-	}
-
+	tr := underClient.Transport.(*http.Transport)
 	if proxyURL == "" {
 		tr.Proxy = http.ProxyFromEnvironment
 	} else {
@@ -196,6 +191,18 @@ func (r *Client) SetProxyURL(proxyURL string) *Client {
 		}
 		tr.Proxy = http.ProxyURL(u)
 	}
+	return r
+}
+
+func (r *Client) SetTransport(transport http.RoundTripper) *Client {
+	var underClient *http.Client
+	switch client := r.http.(type) {
+	case *http.Client:
+		underClient = client
+	case *HTTPBalancer:
+		underClient = client.httpClient.(*http.Client)
+	}
+	underClient.Transport = transport
 	return r
 }
 
